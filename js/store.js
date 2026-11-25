@@ -209,6 +209,15 @@ export async function saveReport(date, { reporterId, buses, ok, details }) {
   } else saveLocal();
 }
 
+export async function deleteReport(date) {
+  delete state.reports[date];
+  if (state.assignments[date]) delete state.assignments[date].rep;
+  if (mode === 'firebase') {
+    await fb.deleteDoc(kdoc('reports', date));
+    if (state.assignments[date]) await fb.updateDoc(kdoc('assignments', date), { rep: fb.deleteField() });
+  } else saveLocal();
+}
+
 export async function resetDemo() { if (mode === 'demo') { state = demoState(); saveLocal(); } }
 
 // ================= נתוני דוגמה =================
