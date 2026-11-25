@@ -156,6 +156,20 @@ export async function saveRound(round) {
     await b.commit();
   } else saveLocal();
 }
+// שיבוץ ידני של מנהל – בלי סימון "החלפה" (כך שהמשובץ יקבל גם את תזכורת השבוע)
+export async function setAssignment(date, volunteerId) {
+  const prev = state.assignments[date] || {};
+  const a = { volunteerId, roundId: 'manual', originalId: null, swappedAt: null };
+  if (prev.rep) a.rep = prev.rep;
+  state.assignments[date] = a;
+  if (mode === 'firebase') await fb.setDoc(kdoc('assignments', date), a);
+  else saveLocal();
+}
+export async function deleteAssignment(date) {
+  delete state.assignments[date];
+  if (mode === 'firebase') await fb.deleteDoc(kdoc('assignments', date));
+  else saveLocal();
+}
 export function lastScheduledDate() {
   const ds = Object.keys(state.assignments).sort();
   return ds[ds.length - 1] || null;

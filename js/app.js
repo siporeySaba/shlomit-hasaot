@@ -270,8 +270,9 @@ function bindLogin() {
 
 // ---------------- ניהול ----------------
 async function admin(tab = 'reports') {
-  const tabs = [['reports', 'דיווחים'], ['volunteers', 'מתנדבים'], ['round', 'הגרלת סבב']];
-  const body = tab === 'volunteers' ? await adminVolunteers() : tab === 'round' ? await adminRound() : await adminReports();
+  const tabs = [['reports', 'דיווחים'], ['volunteers', 'מתנדבים'], ['manual', 'שיבוץ ידני'], ['round', 'הגרלה']];
+  const body = tab === 'volunteers' ? await adminVolunteers() : tab === 'round' ? await adminRound()
+    : tab === 'manual' ? await adminManual() : await adminReports();
   const fbMode = store.mode === 'firebase';
   return `
   <section class="block">
@@ -374,18 +375,125 @@ async function adminRound() {
   <div id="round-out"></div>`;
 }
 
+// שורה חופשית → {name, phone, capacity}. מבין "שם - 0541234567", "שם, 054-1234567, 2", טאבים מאקסל וכו'.
+function normPhone(p) {
+  let d = p.replace(/\D/g, '');
+  if (d.startsWith('972')) d = '0' + d.slice(3);
+  return d.length === 10 ? d.slice(0, 3) + '-' + d.slice(3) : d.length === 9 ? d.slice(0, 2) + '-' + d.slice(2) : p.trim();
+}
+function parseLine(l) {
+  const m = l.match(/(?:\+?972|0)[\d\-\s]{7,12}\d/);
+  let rest = m ? l.replace(m[0], ' ') : l;
+  let capacity = 1;
+  const c = rest.match(/(?:^|[\s,;\t|])([12])\s*$/);
+  if (c) { capacity = Number(c[1]); rest = rest.slice(0, c.index); }
+  const name = rest.replace(/[-–—,;\t|:]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return { name, phone: m ? normPhone(m[0]) : '', capacity };
+}
 function parseImport(text) {
-  return text.split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(l => {
-    const parts = l.split(/[,\t;]/).map(x => x.trim()).filter(Boolean);
-    const phoneIdx = parts.findIndex(p => /\d{7,}/.test(p.replace(/[-\s+]/g, '')));
-    const phone = phoneIdx >= 0 ? parts[phoneIdx] : '';
-    const rest = parts.filter((_, i) => i !== phoneIdx);
-    const cap = rest.length > 1 && /^[12]$/.test(rest[rest.length - 1]) ? Number(rest.pop()) : 1;
-    return { name: rest.join(' '), phone, capacity: cap };
-  }).filter(x => x.name);
+  return text.split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(parseLine).filter(x => x.name);
+}
+// מוצא מתנדב פעיל לפי שם, או יוצר חדש
+async function ensureVolunteer({ name, phone, capacity }) {
+  const s = await store.getState();
+  return s.volunteers.find(v => v.active !== false && v.name === name) || store.addVolunteer({ name, phone, capacity });
+}
+
+async function adminManual() {
+  const s = await store.getState();
+  const t = todayIso();
+  const vols = s.volunteers.filter(v => v.active !== false).sort((x, y) => x.name.localeCompare(y.name, 'he'));
+  const last = store.lastScheduledDate();
+  let start = last && last >= t ? addDays(last, 1) : addDays(t, 1);
+  while (weekday(start) === 6) start = addDays(start, 1);
+  const future = Object.keys(s.assignments).filter(d => d >= t).sort();
+  return `
+  <div class="rule">
+    <h3>הדבקת שיבוצים מוכנים</h3>
+    <p>מדביקים שורה לכל יום, לפי סדר הימים, למשל <code>ישראל ישראלי - 0501234567</code>. מי שלא קיים ברשימה יתווסף אוטומטית.</p>
+  </div>
+  <form id="paste-form" class="round-form">
+    <label class="field"><span class="field-label">היום הראשון ברשימה</span><input type="date" name="start" value="${start}" required></label>
+    <fieldset class="field"><legend class="field-label">ימים עם הסעות</legend>
+      <div class="chips chips-days">${[0, 1, 2, 3, 4, 5].map(i => `<label class="chip"><input type="checkbox" name="wd" value="${i}" checked><span>${DAY_LETTERS[i]}</span></label>`).join('')}</div>
+    </fieldset>
+    <label class="field"><span class="field-label">השיבוצים</span><textarea name="lines" rows="6" required></textarea></label>
+    <div class="sheet-acts"><button class="btn btn-ink">תצוגה מקדימה</button></div>
+  </form>
+  <div id="paste-out"></div>
+
+  <div class="rule rule-gap"><h3>שיבוץ של יום אחד</h3><p>קובע מי משובץ בתאריך מסוים. אם כבר יש שם מישהו, הוא מוחלף.</p></div>
+  <form id="one-form" class="one-form">
+    <input type="date" name="date" value="${addDays(t, 1)}" required aria-label="תאריך">
+    <select name="vol" required aria-label="מתנדב/ת"><option value="">בחירת מתנדב/ת…</option>${vols.map(v => `<option value="${v.id}">${esc(v.name)}</option>`).join('')}</select>
+    <button class="btn btn-ink">שיבוץ</button>
+  </form>
+
+  <h3 class="sub-h">השיבוצים מהיום והלאה</h3>
+  ${future.length ? `<ul class="vols">${future.map(d => `
+    <li class="vol" data-date="${d}">
+      <span class="vol-name">${esc(nameOf(s.assignments[d].volunteerId))}</span>
+      <span class="vol-phone">${DAY_LETTERS[weekday(d)]} ${fmtSlash(d)}</span>
+      <span></span>
+      <button type="button" class="x" data-unassign aria-label="ביטול השיבוץ ב-${fmtSlash(d)}">✕</button>
+    </li>`).join('')}</ul>` : '<p class="empty">אין שיבוצים עתידיים.</p>'}`;
+}
+
+function bindManual() {
+  const pf = $('#paste-form');
+  if (!pf) return;
+  pf.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(pf);
+    const rows = parseImport(String(fd.get('lines')));
+    const wds = fd.getAll('wd').map(Number);
+    if (!rows.length || !wds.length) return toast('לא נמצאו שורות');
+    const s = await store.getState();
+    let d = fd.get('start');
+    const plan = rows.map(r => {
+      while (!wds.includes(weekday(d))) d = addDays(d, 1);
+      const p = { ...r, date: d }; d = addDays(d, 1); return p;
+    });
+    const out = $('#paste-out');
+    out.innerHTML = `
+      <div class="round-res">
+        <h3>${plan.length} שיבוצים · ${fmtSlash(plan[0].date)}–${fmtSlash(plan[plan.length - 1].date)}</h3>
+        <ol class="round-list">${plan.map(p => {
+          const exists = s.volunteers.some(v => v.active !== false && v.name === p.name);
+          const taken = s.assignments[p.date] ? ` <small class="warn">(במקום ${esc(nameOf(s.assignments[p.date].volunteerId))})</small>` : '';
+          return `<li><span>${DAY_LETTERS[weekday(p.date)]} ${fmtSlash(p.date)}</span><b>${esc(p.name)}${exists ? '' : ' <small class="new">חדש</small>'}${taken}</b></li>`;
+        }).join('')}</ol>
+        <div class="sheet-acts"><button class="btn btn-sun" id="paste-save">שמירת השיבוצים</button></div>
+      </div>`;
+    $('#paste-save').addEventListener('click', async (ev) => {
+      ev.currentTarget.disabled = true;
+      for (const p of plan) {
+        const v = await ensureVolunteer(p);
+        await store.setAssignment(p.date, v.id);
+      }
+      toast(`נשמרו ${plan.length} שיבוצים`); render();
+    });
+  });
+
+  $('#one-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    const date = fd.get('date'), vol = fd.get('vol');
+    const s = await store.getState();
+    if (s.assignments[date] && !confirm(`ב-${fmtSlash(date)} משובץ/ת ${nameOf(s.assignments[date].volunteerId)}. להחליף?`)) return;
+    await store.setAssignment(date, vol);
+    toast(`${nameOf(vol)} שובץ/ה ל-${fmtSlash(date)}`); render();
+  });
+
+  view.querySelectorAll('[data-unassign]').forEach(b => b.addEventListener('click', async () => {
+    const date = b.closest('li').dataset.date;
+    if (!confirm(`לבטל את השיבוץ של ${fmtSlash(date)}?`)) return;
+    await store.deleteAssignment(date); toast('השיבוץ בוטל'); render();
+  }));
 }
 
 function bindAdmin(tab) {
+  bindManual();
   $('#logout')?.addEventListener('click', async () => { await store.signOut(); location.hash = '#/'; });
   $('#copy-link')?.addEventListener('click', async () => {
     const link = store.shareLink();
