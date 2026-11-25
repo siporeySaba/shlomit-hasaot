@@ -406,15 +406,19 @@ async function adminReports() {
   </div>
   <div class="table-wrap">
     <table class="tbl">
-      <thead><tr><th>תאריך</th><th>משובץ/ת</th><th>מדווח/ת</th><th>הסעות</th><th>תקין</th><th>פירוט</th></tr></thead>
+      <thead><tr><th>תאריך</th><th>משובץ/ת</th><th>מדווח/ת</th><th>הסעות</th><th>תקין</th><th>פירוט</th><th><span class="sr">פעולות</span></th></tr></thead>
       <tbody>${rows.map(x => `
-        <tr class="${!x.r ? 'row-miss' : x.r.ok ? '' : 'row-bad'}">
+        <tr class="${!x.r ? 'row-miss' : x.r.ok ? '' : 'row-bad'}" data-date="${x.date}">
           <td data-l="תאריך"><b>${fmtSlash(x.date)}</b> <small>${x.wd}</small></td>
           <td data-l="משובץ/ת">${esc(x.assigned)}</td>
           <td data-l="מדווח/ת">${x.r ? esc(x.reporter) : '<span class="tag tag-miss">לא דווח</span>'}</td>
           <td data-l="הסעות">${x.buses}</td>
           <td data-l="תקין">${x.r ? `<span class="tag ${x.r.ok ? 'tag-ok' : 'tag-bad'}">${x.ok}</span>` : ''}</td>
           <td data-l="פירוט" class="td-details">${esc(x.details)}</td>
+          <td class="td-acts">
+            ${x.r ? '<button type="button" class="mini" data-del-report>מחיקת דיווח</button>' : ''}
+            <button type="button" class="mini mini-red" data-del-assign>מחיקת שיבוץ</button>
+          </td>
         </tr>`).join('')}</tbody>
     </table>
   </div>`;
@@ -615,6 +619,20 @@ function bindAdmin(tab) {
   if (exp) exp.addEventListener('click', exportCsv);
   const ob = $('#only-bad');
   if (ob) ob.addEventListener('change', () => view.querySelectorAll('.tbl tbody tr').forEach(tr => { tr.hidden = ob.checked && !tr.classList.contains('row-bad'); }));
+  view.querySelectorAll('.tbl tbody tr').forEach(tr => {
+    const date = tr.dataset.date;
+    tr.querySelector('[data-del-report]')?.addEventListener('click', async () => {
+      if (!confirm(`למחוק את הדיווח של ${fmtSlash(date)}? אי אפשר לשחזר.`)) return;
+      await store.deleteReport(date); toast('הדיווח נמחק'); render();
+    });
+    tr.querySelector('[data-del-assign]')?.addEventListener('click', async () => {
+      const s = await store.getState();
+      const hasReport = !!s.reports[date];
+      if (!confirm(`למחוק את השיבוץ של ${nameOf(s.assignments[date]?.volunteerId)} ב-${fmtSlash(date)}?${hasReport ? ' גם הדיווח של היום הזה יימחק.' : ''} אי אפשר לשחזר.`)) return;
+      if (hasReport) await store.deleteReport(date);
+      await store.deleteAssignment(date); toast('השיבוץ נמחק'); render();
+    });
+  });
 
   const add = $('#add-vol');
   if (add) {
