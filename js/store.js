@@ -89,7 +89,8 @@ async function loadAll() {
     const [vs, as, rs] = await Promise.all([fb.getDocs(kcol('volunteers')), fb.getDocs(kcol('assignments')), fb.getDocs(kcol('rounds'))]);
     vs.forEach(d => s.volunteers.push({ id: d.id, ...d.data() }));
     as.forEach(d => { s.assignments[d.id] = d.data(); });
-    rs.forEach(d => s.rounds.push({ id: d.id, ...d.data() }));
+    // ימי חופש נשמרים כמסמך מיוחד באוסף rounds (כך לא צריך לשנות את כללי האבטחה)
+    rs.forEach(d => { if (d.id === HOLIDAYS_DOC) s.holidays = d.data().days || {}; else s.rounds.push({ id: d.id, ...d.data() }); });
   } catch (e) {
     // מפתח שגוי / לא קיים
     console.warn(e); session.needsKey = true; state = s; return;
@@ -186,6 +187,50 @@ export async function deleteAssignment(date) {
   delete state.assignments[date];
   if (mode === 'firebase') await fb.deleteDoc(kdoc('assignments', date));
   else saveLocal();
+}
+// ================= ימי חופש =================
+// state.holidays = { 'YYYY-MM-DD': 'שם החופש' }
+const HOLIDAYS_DOC = '_holidays';
+export const holidays = () => state.holidays || {};
+export async function setHolidays(dates, name) {
+  state.holidays = state.holidays || {};
+  const patch = {};
+  for (const d of dates) { state.holidays[d] = name || 'חופש'; patch[d] = state.holidays[d]; }
+  if (mode === 'firebase') await fb.setDoc(kdoc('rounds', HOLIDAYS_DOC), { days: patch }, { merge: true });
+  else saveLocal();
+}
+export async function removeHolidays(dates) {
+  state.holidays = state.holidays || {};
+  const patch = {};
+  for (const d of dates) { delete state.holidays[d]; patch[d] = mode === 'firebase' ? fb.deleteField() : null; }
+  if (mode === 'firebase') await fb.setDoc(kdoc('rounds', HOLIDAYS_DOC), { days: patch }, { merge: true });
+  else saveLocal();
+}
+// ימי ההסעות לפי השיבוצים הקיימים (ברירת מחדל: ראשון עד שישי)
+export function schoolDays() {
+  const set = new Set(Object.keys(state.assignments).map(d => new Date(d + 'T12:00').getDay()));
+  return set.size ? [...set].sort() : [0, 1, 2, 3, 4, 5];
+}
+// הזזת כל השיבוצים מתאריך מסוים והלאה: כל אחד עובר ליום ההסעות הפנוי הבא (בלי ימי חופש). אף אחד לא מאבד תור.
+export async function reflowFrom(from) {
+  const days = schoolDays(), hol = holidays();
+  const old = Object.keys(state.assignments).filter(d => d >= from).sort();
+  const items = old.map(d => state.assignments[d]);
+  const next = {};
+  let cur = from;
+  for (const it of items) {
+    while (!days.includes(new Date(cur + 'T12:00').getDay()) || hol[cur]) cur = addDays(cur, 1);
+    next[cur] = it; cur = addDays(cur, 1);
+  }
+  for (const d of old) delete state.assignments[d];
+  Object.assign(state.assignments, next);
+  if (mode === 'firebase') {
+    const b = fb.writeBatch(fb.db);
+    for (const d of old) if (!next[d]) b.delete(kdoc('assignments', d));
+    for (const [d, a] of Object.entries(next)) b.set(kdoc('assignments', d), a);
+    await b.commit();
+  } else saveLocal();
+  return { moved: items.length, until: Object.keys(next).sort().pop() };
 }
 export function lastScheduledDate() {
   const ds = Object.keys(state.assignments).sort();

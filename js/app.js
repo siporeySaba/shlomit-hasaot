@@ -296,8 +296,8 @@ function bindLogin() {
 // ---------------- ניהול ----------------
 async function admin(tab) {
   tab = tab || 'reminders';
-  const tabs = [['reminders', 'תזכורות'], ['reports', 'דיווחים'], ['volunteers', 'מתנדבים'], ['manual', 'שיבוץ ידני'], ['round', 'הגרלה']];
-  const body = tab === 'volunteers' ? await adminVolunteers() : tab === 'round' ? await adminRound()
+  const tabs = [['reminders', 'תזכורות'], ['reports', 'דיווחים'], ['volunteers', 'מתנדבים'], ['manual', 'שיבוץ ידני'], ['holidays', 'ימי חופש'], ['round', 'הגרלה']];
+  const body = tab === 'volunteers' ? await adminVolunteers() : tab === 'round' ? await adminRound() : tab === 'holidays' ? await adminHolidays()
     : tab === 'manual' ? await adminManual() : tab === 'reports' ? await adminReports() : await adminReminders();
   const fbMode = store.mode === 'firebase';
   return `
@@ -455,6 +455,138 @@ async function adminVolunteers() {
   </details>`;
 }
 
+// ---------- ימי חופש ----------
+let holMonth = null; // 'YYYY-MM'
+async function adminHolidays() {
+  const s = await store.getState();
+  const hol = store.holidays();
+  const t = todayIso();
+  holMonth = holMonth || t.slice(0, 7);
+  const [y, m] = holMonth.split('-').map(Number);
+  const first = `${holMonth}-01`;
+  const daysIn = new Date(y, m, 0).getDate();
+  const lead = weekday(first); // ראשון = 0, בעמודה הימנית
+  const cells = [];
+  for (let i = 0; i < lead; i++) cells.push('<span class="cal-cell cal-empty"></span>');
+  for (let d = 1; d <= daysIn; d++) {
+    const iso = `${holMonth}-${String(d).padStart(2, '0')}`;
+    const a = s.assignments[iso];
+    const cls = ['cal-cell', hol[iso] ? 'is-hol' : '', a ? 'has-assign' : '', iso < t ? 'is-past' : '', iso === t ? 'is-today' : '', weekday(iso) === 6 ? 'is-sat' : ''].filter(Boolean).join(' ');
+    cells.push(`<button type="button" class="${cls}" data-day="${iso}" ${weekday(iso) === 6 ? 'disabled' : ''} title="${esc(hol[iso] || (a ? nameOf(a.volunteerId) : ''))}">
+      <b>${d}</b>${hol[iso] ? `<small>${esc(hol[iso])}</small>` : a ? `<small>${esc(nameOf(a.volunteerId).split(' ')[0])}</small>` : ''}</button>`);
+  }
+  // רשימת החופשים הקרובים, מקובצים לרצפים
+  const list = Object.keys(hol).filter(d => d >= t).sort();
+  const groups = [];
+  for (const d of list) {
+    const g = groups[groups.length - 1];
+    if (g && g.name === hol[d] && d <= addDays(g.to, 2)) g.to = d, g.days.push(d); else groups.push({ name: hol[d], from: d, to: d, days: [d] });
+  }
+  return `
+  <p class="hint">כותבים שם (למשל "חנוכה") ולוחצים על הימים בלוח. לחיצה נוספת מבטלת. אם יש שיבוץ ביום שהופך לחופש, האתר ישאל מה לעשות איתו.</p>
+  <div class="hol-tools">
+    <input id="hol-name" placeholder="שם החופש (לא חובה)" value="חופש">
+  </div>
+  <div class="cal">
+    <div class="cal-head">
+      <button type="button" class="btn btn-ghost btn-sm" data-month="-1" aria-label="חודש קודם">→</button>
+      <b>${MONTHS[m - 1]} ${y}</b>
+      <button type="button" class="btn btn-ghost btn-sm" data-month="1" aria-label="חודש הבא">←</button>
+    </div>
+    <div class="cal-grid">${DAY_LETTERS.map(l => `<span class="cal-dow">${l}</span>`).join('')}${cells.join('')}</div>
+    <div class="cal-legend"><span><i class="lg lg-hol"></i>חופש</span><span><i class="lg lg-as"></i>יש שיבוץ</span></div>
+  </div>
+  <details class="import">
+    <summary>הוספת טווח תאריכים (חופשה ארוכה)</summary>
+    <form id="hol-range" class="one-form" style="margin-top:12px">
+      <input type="date" name="from" required aria-label="מתאריך">
+      <input type="date" name="to" required aria-label="עד תאריך">
+      <button class="btn btn-ink">הוספה</button>
+    </form>
+  </details>
+  <h3 class="sub-h">ימי חופש מהיום והלאה</h3>
+  ${groups.length ? `<ul class="vols">${groups.map(g => `
+    <li class="vol" data-days="${g.days.join(',')}">
+      <span class="vol-name">${esc(g.name)}</span>
+      <span class="vol-phone">${g.from === g.to ? `${DAY_LETTERS[weekday(g.from)]} ${fmtSlash(g.from)}` : `${fmtSlash(g.from)} עד ${fmtSlash(g.to)} (${g.days.length} ימים)`}</span>
+      <span></span>
+      <button type="button" class="x" data-unhol aria-label="ביטול">✕</button>
+    </li>`).join('')}</ul>` : '<p class="empty">לא הוגדרו ימי חופש.</p>'}`;
+}
+
+// שואל מה לעשות עם שיבוצים שנופלים על ימי חופש חדשים
+function askClash(clash) {
+  return new Promise((resolve) => {
+    sheet.innerHTML = `<form method="dialog" class="sheet-in">
+      <div class="sheet-head"><p class="kicker">יש שיבוצים בימים האלה</p><h2>מה לעשות?</h2>
+        <p class="hint">${clash.map(d => `${DAY_LETTERS[weekday(d)]} ${fmtSlash(d)}: ${esc(nameOf(sheetState.assignments[d]?.volunteerId))}`).join('<br>')}</p></div>
+      <button class="btn btn-sun" value="shift">להזיז את כל השיבוצים קדימה<br><small>כל אחד עובר ליום ההסעות הבא, אף אחד לא מאבד תור</small></button>
+      <button class="btn btn-ghost" value="drop">לבטל רק את השיבוצים האלה</button>
+      <button class="btn btn-ghost" value="cancel">ביטול, לא להגדיר חופש</button>
+    </form>`;
+    const form = $('form', sheet);
+    form.addEventListener('submit', (e) => { e.preventDefault(); const v = e.submitter?.value || 'cancel'; sheet.close(); resolve(v); });
+    sheet.addEventListener('close', () => resolve('cancel'), { once: true });
+    sheet.showModal();
+  });
+}
+let sheetState = null;
+
+async function addHolidayDates(dates) {
+  const s = await store.getState();
+  sheetState = s;
+  dates = dates.filter(d => weekday(d) !== 6);
+  if (!dates.length) return;
+  const name = ($('#hol-name')?.value || '').trim() || 'חופש';
+  const clash = dates.filter(d => s.assignments[d]).sort();
+  let choice = 'none';
+  if (clash.length) {
+    choice = await askClash(clash);
+    if (choice === 'cancel') return;
+  }
+  await store.setHolidays(dates, name);
+  if (choice === 'shift') {
+    const r = await store.reflowFrom(clash[0]);
+    toast(`נשמר. ${r.moved} שיבוצים הוזזו קדימה`);
+  } else {
+    if (choice === 'drop') for (const d of clash) await store.deleteAssignment(d);
+    toast(dates.length > 1 ? `נוספו ${dates.length} ימי חופש` : `${fmtSlash(dates[0])} הוגדר כחופש`);
+  }
+  render();
+}
+
+function bindHolidays() {
+  if (!$('.cal')) return;
+  view.querySelectorAll('[data-month]').forEach(b => b.addEventListener('click', () => {
+    const [y, m] = holMonth.split('-').map(Number);
+    const d = new Date(y, m - 1 + Number(b.dataset.month), 1);
+    holMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    render();
+  }));
+  view.querySelectorAll('[data-day]').forEach(b => b.addEventListener('click', async () => {
+    const d = b.dataset.day;
+    if (store.holidays()[d]) {
+      if (!confirm(`לבטל את החופש ב-${fmtSlash(d)}?`)) return;
+      await store.removeHolidays([d]); toast('בוטל'); render();
+    } else await addHolidayDates([d]);
+  }));
+  $('#hol-range').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    let a = fd.get('from'), b = fd.get('to');
+    if (b < a) [a, b] = [b, a];
+    const dates = [];
+    for (let d = a; d <= b; d = addDays(d, 1)) dates.push(d);
+    if (dates.length > 62) return toast('טווח ארוך מדי');
+    await addHolidayDates(dates);
+  });
+  view.querySelectorAll('[data-unhol]').forEach(b => b.addEventListener('click', async () => {
+    const days = b.closest('li').dataset.days.split(',');
+    if (!confirm(`לבטל ${days.length > 1 ? `${days.length} ימי חופש` : 'את יום החופש'}? (השיבוצים לא יחזרו אוטומטית)`)) return;
+    await store.removeHolidays(days); toast('בוטל'); render();
+  }));
+}
+
 async function adminRound() {
   const last = store.lastScheduledDate();
   let start = last ? addDays(last, 1) : todayIso();
@@ -468,7 +600,7 @@ async function adminRound() {
     <fieldset class="field"><legend class="field-label">ימים עם הסעות</legend>
       <div class="chips chips-days">${[0, 1, 2, 3, 4, 5].map(i => `<label class="chip"><input type="checkbox" name="wd" value="${i}" checked><span>${DAY_LETTERS[i]}</span></label>`).join('')}</div>
     </fieldset>
-    <label class="field"><span class="field-label">תאריכים בלי הסעות (חגים, חופשות) – תאריך בכל שורה, למשל 14/12</span><textarea name="ex" rows="2" dir="ltr"></textarea></label>
+    <p class="hint">ימי החופש שמוגדרים בלשונית <a href="#/admin/holidays">ימי חופש</a> מדולגים אוטומטית (${Object.keys(store.holidays()).length} ימים מוגדרים).</p>
     <label class="field"><span class="field-label">מספר הגרלה</span><input name="seed" value="${randomSeed()}" inputmode="numeric"></label>
     <div class="sheet-acts"><button class="btn btn-ink" value="preview">הגרלה (תצוגה מקדימה)</button></div>
   </form>
@@ -551,7 +683,7 @@ function bindManual() {
     const s = await store.getState();
     let d = fd.get('start');
     const plan = rows.map(r => {
-      while (!wds.includes(weekday(d))) d = addDays(d, 1);
+      while (!wds.includes(weekday(d)) || store.holidays()[d]) d = addDays(d, 1);
       const p = { ...r, date: d }; d = addDays(d, 1); return p;
     });
     const out = $('#paste-out');
@@ -594,6 +726,7 @@ function bindManual() {
 
 function bindAdmin(tab) {
   bindManual();
+  bindHolidays();
   bindReminders();
   $('#logout')?.addEventListener('click', async () => { await store.signOut(); location.hash = '#/'; });
   $('#copy-link')?.addEventListener('click', async () => {
@@ -661,12 +794,7 @@ function bindAdmin(tab) {
     const s = await store.getState();
     const fd = new FormData(rf);
     const startD = fd.get('start');
-    const y = parseIso(startD).getFullYear();
-    const excluded = String(fd.get('ex') || '').split(/\s|,/).filter(Boolean).map(x => {
-      const [d, m] = x.split(/[/.]/).map(Number); if (!d || !m) return null;
-      let yy = y; if (m < parseIso(startD).getMonth() + 1 - 2) yy++;
-      return `${yy}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-    }).filter(Boolean);
+    const excluded = Object.keys(store.holidays());
     const round = buildRound({ volunteers: s.volunteers, start: startD, weekdays: fd.getAll('wd').map(Number), excluded, seed: fd.get('seed') || randomSeed() });
     const out = $('#round-out');
     const clash = round.slots.filter(x => s.assignments[x.date]).length;
