@@ -295,7 +295,7 @@ const intlPhone = (p) => { let d = String(p || '').replace(/\D/g, ''); if (d.sta
 function reminderText(v, date) {
   const first = v.name.trim().split(/\s+/)[0];
   return `היי ${first}, מתזכר אותך שאתה משובץ להשגחה בתחנת ההסעה ביום ${DAY_NAMES[weekday(date)]} בתאריך ${fmtSlash(date)}, בין 7:20 ל-7:40. ` +
-    `אם לא מסתדר לך, נשמח מאוד שתמצא מחליף ותשבץ אותו באתר שומרי התחנה:\n${store.shareLink()}`;
+    `אם לא מסתדר לך, נשמח מאוד שתמצא מחליף ותשבץ אותו באתר שומרי התחנה:\n${store.shareLink()}\n\nתודה רבה, זה לא מובן מאליו 🙏`;
 }
 
 async function adminReminders() {
