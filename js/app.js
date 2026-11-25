@@ -269,10 +269,11 @@ function bindLogin() {
 }
 
 // ---------------- ניהול ----------------
-async function admin(tab = 'reports') {
-  const tabs = [['reports', 'דיווחים'], ['volunteers', 'מתנדבים'], ['manual', 'שיבוץ ידני'], ['round', 'הגרלה']];
+async function admin(tab) {
+  tab = tab || 'reminders';
+  const tabs = [['reminders', 'תזכורות'], ['reports', 'דיווחים'], ['volunteers', 'מתנדבים'], ['manual', 'שיבוץ ידני'], ['round', 'הגרלה']];
   const body = tab === 'volunteers' ? await adminVolunteers() : tab === 'round' ? await adminRound()
-    : tab === 'manual' ? await adminManual() : await adminReports();
+    : tab === 'manual' ? await adminManual() : tab === 'reports' ? await adminReports() : await adminReminders();
   const fbMode = store.mode === 'firebase';
   return `
   <section class="block">
@@ -286,6 +287,75 @@ async function admin(tab = 'reports') {
     <div class="tabs" role="tablist">${tabs.map(([k, l]) => `<a role="tab" href="#/admin/${k}" class="${k === tab ? 'on' : ''}">${l}</a>`).join('')}</div>
     ${body}
   </section>`;
+}
+
+// ---------- תזכורות (שליחה ידנית בלחיצה, עד שיהיה API) ----------
+let remDay = null; // היום שבו שולחים (ברירת מחדל: היום)
+const intlPhone = (p) => { let d = String(p || '').replace(/\D/g, ''); if (d.startsWith('0')) d = '972' + d.slice(1); return d; };
+function reminderText(v, date) {
+  const first = v.name.trim().split(/\s+/)[0];
+  return `היי ${first}, מתזכר אותך שאתה משובץ להשגחה בתחנת ההסעה ביום ${DAY_NAMES[weekday(date)]} בתאריך ${fmtSlash(date)}, בין 7:20 ל-7:40. ` +
+    `אם לא מסתדר לך, נשמח מאוד שתמצא מחליף ותשבץ אותו באתר שומרי התחנה:\n${store.shareLink()}`;
+}
+
+async function adminReminders() {
+  const s = await store.getState();
+  const t = todayIso();
+  const day = remDay || t;
+  const items = [];
+  const eve = addDays(day, 1), week = addDays(day, 7);
+  // ערב לפני: מי שמשובץ מחר (כולל מחליף). לשיבוץ של יום ראשון – מופיע בשבת, לשליחה במוצאי שבת.
+  if (s.assignments[eve]) items.push({ type: 'eve', date: eve, a: s.assignments[eve] });
+  // שבוע לפני: רק המשובץ המקורי (מי שהוחלף לא מקבל; המחליף מקבל רק את תזכורת הערב)
+  if (s.assignments[week] && !s.assignments[week].originalId) items.push({ type: 'week', date: week, a: s.assignments[week] });
+  const dayLabel = day === t ? 'היום' : day === addDays(t, 1) ? 'מחר' : day === addDays(t, -1) ? 'אתמול' : `יום ${DAY_NAMES[weekday(day)]}`;
+  const cards = items.map(({ type, date, a }) => {
+    const v = store.volunteerById(a.volunteerId) || { name: '—' };
+    const id = `${date}_${type}_${a.volunteerId}`;
+    const sent = store.sentAt(id);
+    const text = reminderText(v, date);
+    const href = v.kosher ? `sms:${v.phone}?&body=${encodeURIComponent(text)}` : `https://wa.me/${intlPhone(v.phone)}?text=${encodeURIComponent(text)}`;
+    return `
+    <article class="rem ${sent ? 'is-sent' : ''}" data-id="${id}">
+      <div class="rem-top">
+        <span class="tag ${type === 'eve' ? 'tag-eve' : 'tag-week'}">${type === 'eve' ? 'ערב לפני' : 'שבוע לפני'}</span>
+        <span class="rem-when">משובץ/ת ליום ${DAY_NAMES[weekday(date)]} ${fmtSlash(date)}</span>
+      </div>
+      <div class="rem-name">${esc(v.name)} ${v.kosher ? '<span class="tag tag-miss">קו כשר</span>' : ''}</div>
+      ${a.originalId && type === 'eve' ? `<div class="swap-note">מחליף/ה את ${esc(nameOf(a.originalId))}</div>` : ''}
+      <details class="rem-text"><summary>נוסח ההודעה</summary><p>${esc(text).replace(/\n/g, '<br>')}</p></details>
+      <div class="rem-acts">
+        ${v.phone ? `<a class="btn ${sent ? 'btn-ghost' : 'btn-sun'}" href="${href}" target="_blank" rel="noopener" data-send>${v.kosher ? 'שליחה ב-SMS' : 'שליחה בוואטסאפ'}</a>`
+                  : '<span class="warn">אין טלפון ברשימה</span>'}
+        ${sent ? `<span class="sent-mark">✓ נשלח ${new Date(sent).toLocaleString('he-IL', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                  <button type="button" class="btn btn-ghost btn-sm" data-unsent>ביטול סימון</button>`
+               : `<button type="button" class="btn btn-ghost btn-sm" data-mark>סימון כנשלח</button>`}
+      </div>
+    </article>`;
+  }).join('');
+  return `
+  <div class="rem-nav">
+    <button type="button" class="btn btn-ghost btn-sm" data-day="-1" aria-label="יום קודם">→</button>
+    <div class="rem-day"><b>${dayLabel}</b><small>${DAY_LETTERS[weekday(day)]} ${fmtSlash(day)}</small></div>
+    <button type="button" class="btn btn-ghost btn-sm" data-day="1" aria-label="יום הבא">←</button>
+    ${day !== t ? '<button type="button" class="btn btn-ghost btn-sm" data-day="0">חזרה להיום</button>' : ''}
+  </div>
+  <p class="hint">לוחצים "שליחה". הוואטסאפ נפתח עם ההודעה מוכנה, ונשאר רק ללחוץ שלח. הכפתור גם מסמן שנשלח.</p>
+  ${cards || `<p class="empty">אין תזכורות לשלוח ${day === t ? 'היום' : 'ביום הזה'}.</p>`}`;
+}
+
+function bindReminders() {
+  view.querySelectorAll('[data-day]').forEach(b => b.addEventListener('click', () => {
+    const n = Number(b.dataset.day);
+    remDay = n === 0 ? null : addDays(remDay || todayIso(), n);
+    render();
+  }));
+  view.querySelectorAll('.rem').forEach(card => {
+    const id = card.dataset.id;
+    card.querySelector('[data-send]')?.addEventListener('click', () => { store.markSent(id).then(() => setTimeout(render, 400)); });
+    card.querySelector('[data-mark]')?.addEventListener('click', async () => { await store.markSent(id); render(); });
+    card.querySelector('[data-unsent]')?.addEventListener('click', async () => { await store.markSent(id, false); render(); });
+  });
 }
 
 function reportRows(s) {
@@ -341,6 +411,7 @@ async function adminVolunteers() {
     <li class="vol" data-id="${v.id}">
       <span class="vol-name">${esc(v.name)}</span>
       <a class="vol-phone" href="tel:${esc(v.phone)}" dir="ltr">${esc(v.phone)}</a>
+      <button type="button" class="ktog ${v.kosher ? 'on' : ''}" data-kosher aria-pressed="${!!v.kosher}" title="קו כשר: תזכורת ב-SMS במקום וואטסאפ">קו כשר</button>
       <span class="seg" role="group" aria-label="כמה פעמים בסבב">
         <button type="button" data-cap="1" class="${v.capacity === 1 ? 'on' : ''}">×1</button>
         <button type="button" data-cap="2" class="${v.capacity === 2 ? 'on' : ''}">×2</button>
@@ -494,6 +565,7 @@ function bindManual() {
 
 function bindAdmin(tab) {
   bindManual();
+  bindReminders();
   $('#logout')?.addEventListener('click', async () => { await store.signOut(); location.hash = '#/'; });
   $('#copy-link')?.addEventListener('click', async () => {
     const link = store.shareLink();
@@ -528,6 +600,10 @@ function bindAdmin(tab) {
       toast('נוסף/ה לרשימה'); render();
     });
     view.querySelectorAll('.vol').forEach(li => {
+      li.querySelector('[data-kosher]').addEventListener('click', async () => {
+        const v = store.volunteerById(li.dataset.id);
+        await store.updateVolunteer(li.dataset.id, { kosher: !v.kosher }); render();
+      });
       li.querySelectorAll('[data-cap]').forEach(b => b.addEventListener('click', async () => { await store.updateVolunteer(li.dataset.id, { capacity: Number(b.dataset.cap) }); render(); }));
       li.querySelector('[data-del]').addEventListener('click', async () => {
         if (!confirm('להסיר מהרשימה? דיווחים קודמים יישמרו.')) return;

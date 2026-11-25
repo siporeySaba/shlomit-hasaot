@@ -96,10 +96,11 @@ async function loadAll() {
   }
   for (const [date, a] of Object.entries(s.assignments)) if (a.rep) s.reports[date] = { reporterId: a.rep.by, ok: a.rep.ok, buses: a.rep.buses, updatedAt: a.rep.at };
   if (session.isAdmin) {
-    const [rep, con] = await Promise.all([fb.getDocs(kcol('reports')), fb.getDocs(fb.collection(fb.db, 'contacts'))]);
+    const [rep, con, sent] = await Promise.all([fb.getDocs(kcol('reports')), fb.getDocs(fb.collection(fb.db, 'contacts')), fb.getDoc(fb.doc(fb.db, 'config', 'sent'))]);
     rep.forEach(d => { s.reports[d.id] = d.data(); });
-    const phones = {}; con.forEach(d => { phones[d.id] = d.data().phone; });
-    s.volunteers.forEach(v => { v.phone = phones[v.id] || ''; });
+    const c = {}; con.forEach(d => { c[d.id] = d.data(); });
+    s.volunteers.forEach(v => { v.phone = c[v.id]?.phone || ''; v.kosher = !!c[v.id]?.kosher; });
+    s.sent = sent.exists() ? (sent.data().log || {}) : {};
   }
   state = s;
 }
@@ -127,9 +128,25 @@ export async function updateVolunteer(id, patch) {
   const v = volunteerById(id); if (!v) return;
   Object.assign(v, patch);
   if (mode === 'firebase') {
-    const { phone, ...pub } = patch;
+    const { phone, kosher, ...pub } = patch; // טלפון וקו כשר – פרטיים, רק ב-contacts
     if (Object.keys(pub).length) await fb.updateDoc(kdoc('volunteers', id), pub);
-    if (phone !== undefined) await fb.setDoc(fb.doc(fb.db, 'contacts', id), { phone, name: v.name });
+    if (phone !== undefined || kosher !== undefined) {
+      const priv = { name: v.name };
+      if (phone !== undefined) priv.phone = phone;
+      if (kosher !== undefined) priv.kosher = kosher;
+      await fb.setDoc(fb.doc(fb.db, 'contacts', id), priv, { merge: true });
+    }
+  } else saveLocal();
+}
+
+// ================= יומן תזכורות שנשלחו =================
+// מזהה: <תאריך שיבוץ>_<eve|week>_<מתנדב>  →  זמן שליחה. נשמר ב-config/sent (מנהלים בלבד).
+export const sentAt = (id) => (state.sent || {})[id] || null;
+export async function markSent(id, on = true) {
+  state.sent = state.sent || {};
+  if (on) state.sent[id] = new Date().toISOString(); else delete state.sent[id];
+  if (mode === 'firebase') {
+    await fb.setDoc(fb.doc(fb.db, 'config', 'sent'), { log: { [id]: on ? state.sent[id] : fb.deleteField() } }, { merge: true });
   } else saveLocal();
 }
 export async function removeVolunteer(id) { await updateVolunteer(id, { active: false }); } // היסטוריה נשמרת

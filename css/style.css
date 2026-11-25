@@ -54,7 +54,7 @@ a { color: inherit; }
 .nav-ico { width: 22px; text-align: center; font-size: 18px; }
 .hills { margin-top: auto; width: calc(100% + 44px); margin-inline: -22px; height: 140px; display: block; }
 
-.view { padding: 44px clamp(18px, 4vw, 56px) 80px; max-width: 980px; outline: none; }
+.view { padding: 44px clamp(18px, 4vw, 56px) 80px; max-width: 980px; min-width: 0; outline: none; }
 
 /* ---------- טיפוגרפיה ---------- */
 .kicker { margin: 0 0 6px; font-weight: 800; font-size: 14px; letter-spacing: .3px; color: var(--red); }
@@ -255,7 +255,7 @@ textarea { resize: vertical; }
 /* ---------- מובייל ---------- */
 @media (max-width: 820px) {
   body { font-size: 16px; }
-  .shell { grid-template-columns: 1fr; }
+  .shell { grid-template-columns: minmax(0, 1fr); }
   .rail {
     position: sticky; top: 0; z-index: 20; height: auto; flex-direction: row; align-items: center;
     padding: 8px 14px; padding-top: max(8px, env(safe-area-inset-top)); border-inline-end: 0; border-bottom: var(--line);
@@ -342,4 +342,41 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: .9em; backgrou
   .one-form { grid-template-columns: 1fr 1fr; }
   .one-form .btn { grid-column: 1 / -1; }
   .tabs a { padding: 10px 4px; font-size: 15px; }
+}
+
+/* ---------- תזכורות ---------- */
+.rem-nav { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+.rem-day { display: flex; flex-direction: column; align-items: center; min-width: 92px; line-height: 1.1; }
+.rem-day b { font-family: var(--display); font-size: 36px; line-height: .9; }
+.rem-day small { color: var(--ink-2); font-weight: 700; }
+.btn-sm { min-height: 38px; padding: 6px 12px; font-size: 14px; }
+.rem {
+  border: var(--line); border-radius: var(--r); box-shadow: var(--shadow); padding: 14px 16px; margin-top: 14px;
+  display: flex; flex-direction: column; gap: 6px; max-width: 640px;
+}
+.rem.is-sent { box-shadow: none; background: var(--sand); }
+.rem-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rem-when { font-weight: 700; font-size: 14px; color: var(--ink-2); }
+.tag-eve { background: var(--orange); }
+.tag-week { background: var(--sun); }
+.rem-name { font-weight: 800; font-size: 22px; }
+.rem-text summary { cursor: pointer; font-size: 14px; font-weight: 700; color: var(--ink-2); }
+.rem-text p { margin: 6px 0 0; padding: 10px 12px; background: #E9F6D9; border-radius: 12px 12px 12px 2px; font-size: 15px; }
+.rem-acts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+.rem-acts a.btn { text-decoration: none; }
+.sent-mark { font-weight: 800; color: var(--green); font-size: 14px; }
+
+/* קו כשר ברשימת המתנדבים */
+.vol { grid-template-columns: 1fr auto auto auto auto; }
+.ktog { border: 1.5px dashed var(--ink-2); background: var(--paper); border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 800; color: var(--ink-2); cursor: pointer; min-height: 30px; }
+.ktog.on { border-style: solid; border-color: var(--ink); background: var(--ink); color: #fff; }
+
+@media (max-width: 820px) {
+  .tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .tabs a { flex: 0 0 auto; padding: 10px 12px; }
+  .vol { grid-template-columns: 1fr auto auto auto; }
+  .vol .ktog { grid-row: 1 / span 2; grid-column: 2; }
+  .vol .seg { grid-column: 3; }
+  .vol .x { grid-column: 4; }
+  .rem-name { font-size: 20px; }
 }
