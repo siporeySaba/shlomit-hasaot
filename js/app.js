@@ -159,6 +159,20 @@ function openSheet(html, onSubmit) {
   sheet.showModal();
 }
 sheet.addEventListener('click', (e) => { if (e.target === sheet) sheet.close(); });
+const SHOW_FIRST = 6;
+
+// בטלפון: החלון יושב תמיד מעל המקלדת, כך שכפתור האישור נשאר גלוי
+const mobileMq = matchMedia('(max-width: 820px)');
+function fitSheet() {
+  const vv = window.visualViewport;
+  if (!vv || !sheet.open || !mobileMq.matches) { sheet.style.marginBottom = ''; sheet.style.maxHeight = ''; return; }
+  const kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+  sheet.style.marginBottom = kb + 'px';
+  sheet.style.maxHeight = Math.round(vv.height - 12) + 'px';
+}
+window.visualViewport?.addEventListener('resize', fitSheet);
+window.visualViewport?.addEventListener('scroll', fitSheet);
+sheet.addEventListener('close', fitSheet);
 
 async function openReport(date) {
   const s = await store.getState();
@@ -219,8 +233,9 @@ async function openSwap(date) {
       <h2>מי מחליף/ה את ${esc(nameOf(a.volunteerId))}?</h2>
       <p class="hint">קודם מתאמים עם המחליף/ה, ואז בוחרים כאן. המחליף/ה יקבל/תקבל תזכורת בוואטסאפ בערב שלפני.</p>
     </div>
-    <input class="search" type="search" placeholder="חיפוש שם…" aria-label="חיפוש שם">
-    <div class="pick-list">${vols.map(v => `<label class="pick"><input type="radio" name="to" value="${v.id}" required><span>${esc(v.name)}</span></label>`).join('')}</div>
+    <input class="search" type="search" placeholder="חיפוש שם…" aria-label="חיפוש שם" enterkeyhint="done">
+    <div class="pick-list">${vols.map((v, i) => `<label class="pick" ${i >= SHOW_FIRST ? 'data-more hidden' : ''}><input type="radio" name="to" value="${v.id}" required><span>${esc(v.name)}</span></label>`).join('')}
+      ${vols.length > SHOW_FIRST ? `<button type="button" class="pick-more">הצגת כל השמות (${vols.length})</button>` : ''}</div>
     <div class="sheet-acts">
       <button class="btn btn-sun btn-wide" value="save">אישור החלפה</button>
       <button class="btn btn-ghost" value="cancel" formnovalidate>ביטול</button>
@@ -230,10 +245,20 @@ async function openSwap(date) {
     toast(`${nameOf(to)} משובץ/ת ל-${fmtSlash(date)}. תודה!`);
   });
   const q = $('.search', sheet);
-  q.addEventListener('input', () => {
+  const more = $('.pick-more', sheet);
+  let showAll = false;
+  const filter = () => {
     const term = q.value.trim();
-    sheet.querySelectorAll('.pick').forEach(p => { p.hidden = term && !p.textContent.includes(term); });
-  });
+    sheet.querySelectorAll('.pick').forEach(p => {
+      p.hidden = term ? !p.textContent.includes(term) : (!showAll && p.hasAttribute('data-more'));
+    });
+    if (more) more.hidden = !!term || showAll;
+  };
+  q.addEventListener('input', filter);
+  q.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); q.blur(); } });
+  more?.addEventListener('click', () => { showAll = true; filter(); });
+  // בחירת שם סוגרת את המקלדת, כדי שכפתור האישור ייראה
+  sheet.querySelectorAll('.pick input').forEach(r => r.addEventListener('change', () => q.blur()));
 }
 
 // ---------------- כניסה ----------------
