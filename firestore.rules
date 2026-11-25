@@ -1,0 +1,64 @@
+rules_version = '2';
+
+// שומרי התחנה · כללי אבטחה
+// - כל נתוני היישוב יושבים מתחת ל-k/{key}. המפתח מגיע בקישור מקבוצת ההורים, ואי אפשר לנחש או לרשום אותו.
+// - טלפונים (contacts) ופירוט הדיווחים (reports) – למנהלים בלבד.
+// - מנהל = משתמש Google שיש לו מסמך ב-admins/{uid} (נוצר ידנית בקונסול).
+// - שליחת התזכורות רצה עם חשבון שירות, שלא כפוף לכללים האלה.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAdmin() {
+      return request.auth != null && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    function keyOk(key) {
+      return exists(/databases/$(database)/documents/keys/$(key));
+    }
+
+    match /admins/{uid} {
+      allow get: if request.auth != null && request.auth.uid == uid;
+      allow list, write: if false;
+    }
+    match /keys/{key} {
+      allow create: if isAdmin() && key.size() >= 16;
+      allow read, update, delete: if false;
+    }
+    match /config/{doc} {
+      allow read, write: if isAdmin();
+    }
+    match /contacts/{id} {
+      allow read, write: if isAdmin();
+    }
+
+    match /k/{key} {
+      match /volunteers/{id} {
+        allow read: if keyOk(key);
+        allow write: if isAdmin() && keyOk(key);
+      }
+      match /rounds/{id} {
+        allow read: if keyOk(key);
+        allow write: if isAdmin() && keyOk(key);
+      }
+      match /assignments/{date} {
+        allow read: if keyOk(key);
+        allow create, delete: if isAdmin() && keyOk(key);
+        // הורים יכולים רק להחליף משובץ ולסמן שדווח
+        allow update: if keyOk(key) && (isAdmin() || (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['volunteerId', 'originalId', 'swappedAt', 'rep'])
+          && request.resource.data.volunteerId is string
+          && exists(/databases/$(database)/documents/k/$(key)/volunteers/$(request.resource.data.volunteerId))
+        ));
+      }
+      match /reports/{date} {
+        allow read, delete: if isAdmin() && keyOk(key);
+        allow create, update: if keyOk(key)
+          && exists(/databases/$(database)/documents/k/$(key)/assignments/$(date))
+          && request.resource.data.keys().hasOnly(['reporterId', 'buses', 'ok', 'details', 'createdAt', 'updatedAt'])
+          && request.resource.data.reporterId is string
+          && request.resource.data.buses is int && request.resource.data.buses >= 1 && request.resource.data.buses <= 6
+          && request.resource.data.ok is bool
+          && request.resource.data.details is string && request.resource.data.details.size() <= 1000;
+      }
+    }
+  }
+}

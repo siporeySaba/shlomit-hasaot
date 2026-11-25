@@ -320,3 +320,14 @@ textarea { resize: vertical; }
   .toast { bottom: calc(84px + env(safe-area-inset-bottom)); }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* ---------- כניסה / מנהל ---------- */
+.gate { max-width: 640px; }
+.uid { font-family: ui-monospace, Consolas, monospace; font-size: 14px; background: var(--sand); border: var(--line); border-radius: 10px; padding: 10px 12px; overflow-wrap: anywhere; }
+code { font-family: ui-monospace, Consolas, monospace; font-size: .9em; background: var(--sand); padding: 0 4px; border-radius: 4px; }
+.admin-head { display: flex; align-items: end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.admin-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.admin-meta .btn { min-height: 38px; padding: 6px 12px; font-size: 14px; }
+.import { margin-top: 18px; border: var(--line); border-radius: var(--r); padding: 12px 14px; }
+.import summary { cursor: pointer; font-weight: 800; }
+.import textarea { margin: 10px 0; }

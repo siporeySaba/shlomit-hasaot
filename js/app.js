@@ -18,8 +18,11 @@ const routes = { '': home, schedule, admin };
 async function render() {
   const [, route = '', sub = ''] = location.hash.split('/');
   document.querySelectorAll('.nav a').forEach(a => a.classList.toggle('on', a.dataset.route === (route || 'home')));
-  const fn = routes[route] || home;
+  let fn = routes[route] || home;
+  if (fn === admin && !store.session.isAdmin) fn = adminLogin;
+  else if (fn !== admin && store.session.needsKey) fn = needKey;
   view.innerHTML = await fn(sub);
+  if (fn === adminLogin) bindLogin();
   view.querySelectorAll('[data-act]').forEach(el => el.addEventListener('click', onAct));
   if (fn === admin) bindAdmin(sub);
   window.scrollTo(0, 0);
@@ -233,13 +236,52 @@ async function openSwap(date) {
   });
 }
 
+// ---------------- כניסה ----------------
+async function needKey() {
+  return `
+  <section class="block gate">
+    <p class="kicker">שומרי התחנה · שלומית</p>
+    <h1 class="h-page">צריך את הקישור מהקבוצה</h1>
+    <p class="lede">האתר פתוח רק להורי היישוב. כדי להיכנס, פתחו את הקישור ששותף בקבוצת ההורים או בתזכורת בוואטסאפ. אחרי פעם אחת הוא נשמר בטלפון.</p>
+  </section>`;
+}
+
+async function adminLogin() {
+  const u = store.session.user;
+  return `
+  <section class="block gate">
+    <p class="kicker">ניהול</p>
+    <h1 class="h-page">כניסת מנהלים</h1>
+    ${u ? `
+      <p class="lede">מחובר/ת בתור <b>${esc(u.email)}</b>, אבל החשבון עוד לא מוגדר כמנהל.</p>
+      <p class="hint">כדי להוסיף: בקונסול של Firebase ← Firestore ← אוסף <code>admins</code> ← מסמך חדש עם המזהה:</p>
+      <p class="uid" dir="ltr">${esc(u.uid)}</p>
+      <div class="sheet-acts"><button class="btn btn-ghost" id="logout">התנתקות</button></div>` : `
+      <p class="lede">המסך הזה מיועד לרכזי הפרויקט. ההתחברות עם חשבון Google.</p>
+      <div class="sheet-acts"><button class="btn btn-sun" id="login">התחברות עם Google</button></div>`}
+  </section>`;
+}
+function bindLogin() {
+  $('#login')?.addEventListener('click', async () => {
+    try { await store.signIn(); } catch (e) { toast('ההתחברות לא הצליחה'); }
+  });
+  $('#logout')?.addEventListener('click', async () => { await store.signOut(); render(); });
+}
+
 // ---------------- ניהול ----------------
 async function admin(tab = 'reports') {
   const tabs = [['reports', 'דיווחים'], ['volunteers', 'מתנדבים'], ['round', 'הגרלת סבב']];
   const body = tab === 'volunteers' ? await adminVolunteers() : tab === 'round' ? await adminRound() : await adminReports();
+  const fbMode = store.mode === 'firebase';
   return `
   <section class="block">
-    <header class="block-head"><h1 class="h-page">ניהול</h1></header>
+    <header class="block-head admin-head">
+      <h1 class="h-page">ניהול</h1>
+      <div class="admin-meta">
+        ${fbMode ? `<button class="btn btn-ghost" id="copy-link">העתקת קישור להורים</button><button class="btn btn-ghost" id="logout">התנתקות</button>`
+                 : `<span class="tag tag-miss">מצב דוגמה · הנתונים רק בדפדפן הזה</span><button class="btn btn-ghost" id="reset-demo">איפוס נתוני דוגמה</button>`}
+      </div>
+    </header>
     <div class="tabs" role="tablist">${tabs.map(([k, l]) => `<a role="tab" href="#/admin/${k}" class="${k === tab ? 'on' : ''}">${l}</a>`).join('')}</div>
     ${body}
   </section>`;
@@ -304,7 +346,12 @@ async function adminVolunteers() {
       </span>
       <button type="button" class="x" data-del aria-label="הסרת ${esc(v.name)}">✕</button>
     </li>`).join('')}</ul>
-  <p class="hint">את הרשימה האמיתית נטען לכאן כשתהיה מוכנה.</p>`;
+  <details class="import">
+    <summary>ייבוא רשימה מלאה (הדבקה מאקסל או מוואטסאפ)</summary>
+    <p class="hint">שורה לכל מתנדב/ת: שם, טלפון, ו-2 למי שפנוי פעמיים בסבב (אחרת פעם אחת). למשל: <code>דנה כהן, 0521234567, 2</code></p>
+    <textarea id="import-text" rows="6"></textarea>
+    <div class="sheet-acts"><button type="button" class="btn btn-ink" id="import-go">ייבוא</button></div>
+  </details>`;
 }
 
 async function adminRound() {
@@ -327,7 +374,38 @@ async function adminRound() {
   <div id="round-out"></div>`;
 }
 
+function parseImport(text) {
+  return text.split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(l => {
+    const parts = l.split(/[,\t;]/).map(x => x.trim()).filter(Boolean);
+    const phoneIdx = parts.findIndex(p => /\d{7,}/.test(p.replace(/[-\s+]/g, '')));
+    const phone = phoneIdx >= 0 ? parts[phoneIdx] : '';
+    const rest = parts.filter((_, i) => i !== phoneIdx);
+    const cap = rest.length > 1 && /^[12]$/.test(rest[rest.length - 1]) ? Number(rest.pop()) : 1;
+    return { name: rest.join(' '), phone, capacity: cap };
+  }).filter(x => x.name);
+}
+
 function bindAdmin(tab) {
+  $('#logout')?.addEventListener('click', async () => { await store.signOut(); location.hash = '#/'; });
+  $('#copy-link')?.addEventListener('click', async () => {
+    const link = store.shareLink();
+    try { await navigator.clipboard.writeText(link); toast('הקישור הועתק. אפשר להדביק בקבוצת ההורים'); }
+    catch (e) { prompt('הקישור להורים:', link); }
+  });
+  $('#reset-demo')?.addEventListener('click', async () => {
+    if (!confirm('לאפס את נתוני הדוגמה?')) return;
+    await store.resetDemo(); toast('אופס'); render();
+  });
+  $('#import-go')?.addEventListener('click', async () => {
+    const list = parseImport($('#import-text').value);
+    if (!list.length) return toast('לא נמצאו שורות לייבוא');
+    const existing = new Set((await store.getState()).volunteers.filter(v => v.active !== false).map(v => v.name));
+    const fresh = list.filter(x => !existing.has(x.name));
+    if (!confirm(`לייבא ${fresh.length} מתנדבים? (${list.length - fresh.length} כבר ברשימה)`)) return;
+    for (const v of fresh) await store.addVolunteer(v);
+    toast(`נוספו ${fresh.length} מתנדבים`); render();
+  });
+
   const exp = $('#export');
   if (exp) exp.addEventListener('click', exportCsv);
   const ob = $('#only-bad');
@@ -391,4 +469,8 @@ async function exportCsv() {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
-render();
+store.onChange(() => { if (!sheet.open) render(); });
+store.init().then(render).catch((e) => {
+  console.error(e);
+  view.innerHTML = `<section class="block gate"><h1 class="h-page">משהו השתבש</h1><p class="lede">לא הצלחנו לטעון את הנתונים. בדקו את החיבור לאינטרנט ונסו לרענן.</p></section>`;
+});

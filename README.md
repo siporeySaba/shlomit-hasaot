@@ -20,3 +20,12 @@
 ## תזכורות (לפי ההחלפות)
 - שבוע לפני: למי שמשובץ, רק אם לא הוחלף (`originalId` ריק)
 - ערב לפני: למי שמשובץ כרגע (כולל מחליף)
+
+## הקמת Firebase (פעם אחת)
+1. console.firebase.google.com ← פרויקט חדש `shlomit-hasaot` (תוכנית Spark החינמית, בלי Analytics)
+2. Build ← Firestore Database ← Create (אזור eur3 / europe-west) ← Production mode
+3. Rules ← להדביק את `firestore.rules` ← Publish
+4. Build ← Authentication ← Get started ← Google ← Enable. ב-Settings ← Authorized domains להוסיף `siporeysaba.github.io`
+5. Project settings ← Your apps ← Web (</>) ← להעתיק את ה-firebaseConfig ל-`js/config.js`
+6. להיכנס לאתר ← ניהול ← התחברות עם Google. יופיע מזהה (UID). בקונסול: Firestore ← אוסף `admins` ← מסמך עם המזהה הזה (שדה כלשהו, למשל `name`)
+7. לרענן: נוצר אוטומטית מפתח יישוב. "העתקת קישור להורים" ← לשלוח בקבוצה
