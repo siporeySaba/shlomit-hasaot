@@ -296,7 +296,7 @@ function bindLogin() {
 // ---------------- ניהול ----------------
 async function admin(tab) {
   tab = tab || 'reminders';
-  const tabs = [['reminders', 'תזכורות'], ['reports', 'דיווחים'], ['volunteers', 'מתנדבים'], ['manual', 'שיבוץ ידני'], ['holidays', 'ימי חופש'], ['round', 'הגרלה']];
+  const tabs = [['reminders', 'תזכורות'], ['reports', 'דיווחים'], ['volunteers', 'מתנדבים'], ['manual', 'שיבוץ ידני'], ['holidays', 'ימי חופש'], ['round', 'שיבוץ סבב']];
   const body = tab === 'volunteers' ? await adminVolunteers() : tab === 'round' ? await adminRound() : tab === 'holidays' ? await adminHolidays()
     : tab === 'manual' ? await adminManual() : tab === 'reports' ? await adminReports() : await adminReminders();
   const fbMode = store.mode === 'firebase';
@@ -588,12 +588,38 @@ function bindHolidays() {
 }
 
 async function adminRound() {
+  const s = await store.getState();
   const last = store.lastScheduledDate();
-  let start = last ? addDays(last, 1) : todayIso();
+  const start = last ? addDays(last, 1) : todayIso();
+  const act = s.volunteers.filter(v => v.active !== false).sort((a, b) => a.name.localeCompare(b.name, 'he'));
+  const pairs = store.couples().filter(([a, b]) => store.volunteerById(a) && store.volunteerById(b));
+  const paired = new Set(pairs.flat());
+  // הצעות: שם משפחה שמופיע בדיוק אצל שניים, שעוד לא סומנו כזוג
+  const byLast = {};
+  for (const v of act) { const l = v.name.trim().split(/\s+/).pop(); (byLast[l] = byLast[l] || []).push(v); }
+  const sugg = Object.values(byLast).filter(g => g.length === 2 && !paired.has(g[0].id) && !paired.has(g[1].id));
+  const opts = act.map(v => `<option value="${v.id}">${esc(v.name)}</option>`).join('');
   return `
   <div class="rule">
-    <h3>איך עובדת ההגרלה</h3>
-    <p>לכל מתנדב/ת יש פתק אחד בכובע (או שניים, למי שפנוי פעמיים). הכובע מעורבב, והפתקים נשלפים לפי סדר הימים. מי ששובץ לא יופיע שוב בחמשת הימים הבאים. <b>מספר ההגרלה</b> מאפשר לכל אחד לשחזר בדיוק את אותה תוצאה, כך שהכל שקוף.</p>
+    <h3>איך עובד השיבוץ</h3>
+    <p>המערכת משבצת את כל המתנדבים לפי סדר הימים, בסדר מעורבב, ושומרת על שלושה כללים:</p>
+    <ul class="rules-list">
+      <li>כל אחד משובץ <b>פעם אחת בסבב</b>, ורק מי שביקש – פעמיים.</li>
+      <li>מי שמשובץ פעמיים: <b>לפחות 3 שבועות</b> בין פעם לפעם.</li>
+      <li>בני זוג: <b>לפחות שבוע</b> בין השיבוץ של אחד לשל השני.</li>
+    </ul>
+    <p>שיבוצים שכבר קיימים לפני תאריך ההתחלה נלקחים בחשבון. לא אוהבים את התוצאה? לוחצים "סידור אחר".</p>
+  </div>
+  <div class="couples">
+    <h3>בני זוג <small>(${pairs.length})</small></h3>
+    ${pairs.length ? `<ul class="couple-list">${pairs.map(([a, b]) => `<li><span>${esc(nameOf(a))} + ${esc(nameOf(b))}</span><button type="button" class="x" data-uncouple="${a}|${b}" aria-label="הסרת הזוג">✕</button></li>`).join('')}</ul>` : '<p class="hint">עדיין לא הוגדרו בני זוג.</p>'}
+    ${sugg.length ? `<p class="hint">הצעות לפי שם משפחה – לחיצה מוסיפה:</p><div class="couple-sugg">${sugg.map(g => `<button type="button" class="chip-btn" data-couple="${g[0].id}|${g[1].id}">${esc(g[0].name)} + ${esc(g[1].name.split(' ')[0])}</button>`).join('')}</div>` : ''}
+    <form id="couple-form" class="couple-form">
+      <select name="a" aria-label="בן/בת זוג ראשון"><option value="">בחירה…</option>${opts}</select>
+      <span>+</span>
+      <select name="b" aria-label="בן/בת זוג שני"><option value="">בחירה…</option>${opts}</select>
+      <button class="btn btn-ink">הוספה</button>
+    </form>
   </div>
   <form id="round-form" class="round-form">
     <label class="field"><span class="field-label">מתחילים בתאריך</span><input type="date" name="start" value="${start}" required></label>
@@ -601,8 +627,7 @@ async function adminRound() {
       <div class="chips chips-days">${[0, 1, 2, 3, 4, 5].map(i => `<label class="chip"><input type="checkbox" name="wd" value="${i}" checked><span>${DAY_LETTERS[i]}</span></label>`).join('')}</div>
     </fieldset>
     <p class="hint">ימי החופש שמוגדרים בלשונית <a href="#/admin/holidays">ימי חופש</a> מדולגים אוטומטית (${Object.keys(store.holidays()).length} ימים מוגדרים).</p>
-    <label class="field"><span class="field-label">מספר הגרלה</span><input name="seed" value="${randomSeed()}" inputmode="numeric"></label>
-    <div class="sheet-acts"><button class="btn btn-ink" value="preview">הגרלה (תצוגה מקדימה)</button></div>
+    <div class="sheet-acts"><button class="btn btn-ink" value="preview">שיבוץ (תצוגה מקדימה)</button></div>
   </form>
   <div id="round-out"></div>`;
 }
@@ -788,6 +813,15 @@ function bindAdmin(tab) {
     });
   }
 
+  document.querySelectorAll('[data-couple]').forEach(b => b.addEventListener('click', async () => { const [a, c] = b.dataset.couple.split('|'); await store.addCouple(a, c); render(); }));
+  document.querySelectorAll('[data-uncouple]').forEach(b => b.addEventListener('click', async () => { const [a, c] = b.dataset.uncouple.split('|'); await store.removeCouple(a, c); render(); }));
+  const cf = $('#couple-form');
+  if (cf) cf.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(cf), a = fd.get('a'), b = fd.get('b');
+    if (!a || !b || a === b) return toast('צריך לבחור שני אנשים שונים');
+    await store.addCouple(a, b); toast('הזוג נוסף'); render();
+  });
   const rf = $('#round-form');
   if (rf) rf.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -795,17 +829,25 @@ function bindAdmin(tab) {
     const fd = new FormData(rf);
     const startD = fd.get('start');
     const excluded = Object.keys(store.holidays());
-    const round = buildRound({ volunteers: s.volunteers, start: startD, weekdays: fd.getAll('wd').map(Number), excluded, seed: fd.get('seed') || randomSeed() });
+    const history = {};
+    for (const [d, a] of Object.entries(s.assignments)) if (d < startD) history[d] = a.volunteerId;
+    const round = buildRound({ volunteers: s.volunteers, start: startD, weekdays: fd.getAll('wd').map(Number), excluded, seed: randomSeed(), couples: store.couples(), history });
+    const probs = round.problems.map(p => p.type === 'self'
+      ? `${nameOf(p.id)} – פעמיים בפחות מ-3 שבועות (${p.dates.map(fmtSlash).join(', ')})`
+      : `${nameOf(p.id)} ו${nameOf(p.other)} – בני זוג בפחות משבוע (${p.dates.map(fmtSlash).join(', ')})`);
+    const twice = new Set(round.slots.filter((x, i, arr) => arr.findIndex(y => y.volunteerId === x.volunteerId) !== i).map(x => x.volunteerId));
     const out = $('#round-out');
     const clash = round.slots.filter(x => s.assignments[x.date]).length;
     out.innerHTML = `
       <div class="round-res">
-        <h3>סבב ${fmtSlash(round.start)}–${fmtSlash(round.end)} · ${round.slots.length} בקרים · הגרלה מס׳ ${esc(round.seed)}</h3>
+        <h3>סבב ${fmtSlash(round.start)}–${fmtSlash(round.end)} · ${round.slots.length} בקרים</h3>
+        ${probs.length ? `<p class="warn">לא הצלחתי לעמוד בכל הכללים:<br>${probs.map(esc).join('<br>')}</p>` : `<p class="ok-note">✓ כל הכללים נשמרו: אף אחד לא פעמיים בלי שביקש, 3 שבועות בין פעמיים, שבוע בין בני זוג.</p>`}
         ${clash ? `<p class="warn">שימו לב: ${clash} תאריכים כבר משובצים ויוחלפו.</p>` : ''}
-        <ol class="round-list">${round.slots.map(x => `<li><span>${DAY_LETTERS[weekday(x.date)]} ${fmtSlash(x.date)}</span><b>${esc(nameOf(x.volunteerId))}</b></li>`).join('')}</ol>
-        <div class="sheet-acts"><button class="btn btn-sun" id="save-round">שמירה ופרסום הסבב</button></div>
+        <ol class="round-list">${round.slots.map(x => `<li><span>${DAY_LETTERS[weekday(x.date)]} ${fmtSlash(x.date)}</span><b>${esc(nameOf(x.volunteerId))}${twice.has(x.volunteerId) ? ' <small>(×2)</small>' : ''}</b></li>`).join('')}</ol>
+        <div class="sheet-acts"><button type="button" class="btn btn-ink" id="redo-round">סידור אחר</button><button type="button" class="btn btn-sun" id="save-round">שמירה ופרסום הסבב</button></div>
       </div>`;
     $('#save-round').addEventListener('click', async () => { await store.saveRound(round); toast('הסבב נשמר'); location.hash = '#/schedule'; });
+    $('#redo-round').addEventListener('click', () => rf.requestSubmit());
     out.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 }

@@ -90,7 +90,7 @@ async function loadAll() {
     vs.forEach(d => s.volunteers.push({ id: d.id, ...d.data() }));
     as.forEach(d => { s.assignments[d.id] = d.data(); });
     // ימי חופש נשמרים כמסמך מיוחד באוסף rounds (כך לא צריך לשנות את כללי האבטחה)
-    rs.forEach(d => { if (d.id === HOLIDAYS_DOC) s.holidays = d.data().days || {}; else s.rounds.push({ id: d.id, ...d.data() }); });
+    rs.forEach(d => { if (d.id === HOLIDAYS_DOC) s.holidays = d.data().days || {}; else if (d.id === COUPLES_DOC) s.couples = d.data().pairs || {}; else s.rounds.push({ id: d.id, ...d.data() }); });
   } catch (e) {
     // מפתח שגוי / לא קיים
     console.warn(e); session.needsKey = true; state = s; return;
@@ -231,6 +231,24 @@ export async function reflowFrom(from) {
     await b.commit();
   } else saveLocal();
   return { moved: items.length, until: Object.keys(next).sort().pop() };
+}
+// ================= בני זוג =================
+// state.couples = { 'idA|idB': true } – בשיבוץ האוטומטי יהיה ביניהם לפחות שבוע
+const COUPLES_DOC = '_couples';
+const pairKey = (a, b) => [a, b].sort().join('|');
+export const couples = () => Object.keys(state.couples || {}).map(k => k.split('|'));
+export async function addCouple(a, b) {
+  if (!a || !b || a === b) return;
+  const k = pairKey(a, b);
+  state.couples = { ...(state.couples || {}), [k]: true };
+  if (mode === 'firebase') await fb.setDoc(kdoc('rounds', COUPLES_DOC), { pairs: { [k]: true } }, { merge: true });
+  else saveLocal();
+}
+export async function removeCouple(a, b) {
+  const k = pairKey(a, b);
+  state.couples = { ...(state.couples || {}) }; delete state.couples[k];
+  if (mode === 'firebase') await fb.setDoc(kdoc('rounds', COUPLES_DOC), { pairs: { [k]: fb.deleteField() } }, { merge: true });
+  else saveLocal();
 }
 export function lastScheduledDate() {
   const ds = Object.keys(state.assignments).sort();
